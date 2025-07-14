@@ -1,0 +1,120 @@
+%%% -- Simulation, vehicle and environment variables -- %%%
+
+%% Simulation
+
+% True-False settings
+settings.trainAgent = false; % mettere true per allenare 
+settings.runParallel = false; 
+settings.plotBadTrajectory = false; 
+settings.saveResults = true; 
+settings.mainDevice = 'cpu'; % Choose to run on cpu or gpu
+
+% Numeric settings
+settings.dt = 0.1;
+settings.episodes_before_plot = 30; 
+settings.total_max_episodes = 800; % maximum episodes for agent training (my pc is dying)
+
+%% Vehicle
+settings.m = 5000; % [Kg] vehicle mass
+settings.shape_x = 0.6.*[-5, -4, -2, -2, 2, 2, 4, 5, 2, 2, -2, -2, -5]; % [m] x nodes of vehicle shape
+settings.shape_y = 0.6.*[0, 0, 3.5, 2, 2, 3.5, 0, 0, 5, 7, 7, 5, 0]; % [m] y nodes of vehicle shape
+settings.left_thrust_x = 0.6.*[-2, -4, -4, -2];
+settings.left_thrust_y = 0.6.*[6, 5, 7, 6];
+settings.right_thrust_x = 0.6.*[2, 4, 4, 2];
+settings.right_thrust_y = 0.6.*[6, 5, 7, 6];
+settings.main_low_thrust_x = 0.6.*[0, 1, -1, 0];
+settings.main_low_thrust_y = 0.6.*[0, 2, 2, 0]; 
+settings.main_high_thrust_x = 0.6.*[0, 1, -1, 0];
+settings.main_high_thrust_y = 0.6.*[-1.5, 2, 2, -1.5]; 
+settings.ActionSpace = [0, 22000, 32000, 9000, -9000]; 
+                 
+settings.v_limit = 2; 
+
+%% Environment
+settings.g = 1.62; % [m/s^2] gravitational acceleration on the moon 
+settings.box_width = 50; %environment
+settings.box_height = 50;
+settings.landing_pad_width = 5; % larghezza landing pad
+settings.landing_pad_altitude = 0;
+settings.box_coordinates = [-settings.box_width/2, ...
+                            settings.box_width/2, ...
+                            settings.box_width/2, ...
+                            -settings.box_width/2; ...
+                           -settings.landing_pad_altitude, ...
+                           -settings.landing_pad_altitude, ...
+                           settings.box_height - settings.landing_pad_altitude, ...
+                           settings.box_height - settings.landing_pad_altitude]; 
+                     
+
+%% ---------- Terreno: landing-pad in cima a una montagnetta -------------
+padHalf   = settings.landing_pad_width/2;   % metà pista (es. 4-5 m)
+landingY  = -settings.landing_pad_altitude; % quota pista (spesso 0)
+hillH     = 6;                              % altezza collina
+sigmaHill = 12;                             % larghezza gaussiana
+
+xL = settings.box_coordinates(1,1);         % bordo sinistro box
+xR = settings.box_coordinates(1,2);         % bordo destro  box
+
+% ------------ profilo continuo “collinetta” -----------------------------
+xProfile = linspace(xL, xR, 500);
+yBase    = landingY - hillH;                        % livello base
+hill     = hillH * exp(-0.5*(xProfile/sigmaHill).^2);
+yProfile = yBase + hill;                            % collina+base
+
+% plateau piatto (landing-pad) in [-padHalf, +padHalf]
+padMask           = (xProfile >= -padHalf & xProfile <= padHalf);
+yProfile(padMask) = landingY;
+
+%% ---------- Rampa di lancio orizzontale (rossa) ------------------------
+x0        = 0.8*settings.box_coordinates(1,end);  % centro rampa
+y0        = 0;                                    % quota rampa
+rampWidth = 8;  nRampPts = 20;
+xRamp     = linspace(x0-rampWidth/2, x0+rampWidth/2, nRampPts);
+yRamp     = y0*ones(1,nRampPts);
+
+%% ---------- Nodi per l’ambiente (collina + rampa) ----------------------
+% Seleziona sotto-campione profilo
+keep                = 1:10:length(xProfile);
+ground_nodes        = [xProfile(keep); yProfile(keep)];
+
+% Elimina nodi che cadono sotto la rampa
+maskKeep            = (ground_nodes(1,:) <  xRamp(1)) | ...
+                      (ground_nodes(1,:) >  xRamp(end));
+ground_nodes        = ground_nodes(:,maskKeep);
+
+% Inserisci i nodi rampa
+ground_nodes        = [ground_nodes  [xRamp; yRamp]];
+
+% --------------- facoltativo: landing-pad come nodi dedicati ------------
+nPadPts  = 20;                                    % risoluzione pad
+xPad     = linspace(-padHalf, padHalf, nPadPts);  % segmenti verdi
+yPad     = landingY*ones(1,nPadPts);
+ground_nodes = [ground_nodes [xPad; yPad]];       % aggiungi
+
+% Ordina per x
+[~,idx]    = sort(ground_nodes(1,:));
+settings.ground_nodes = ground_nodes(:,idx);
+
+%% ----------------------------- PLOT ------------------------------------
+figure; hold on; axis equal; grid on
+title('Environment');
+
+% terreno nero
+plot(settings.ground_nodes(1,:), settings.ground_nodes(2,:), ...
+     'k','LineWidth',2);
+
+% rampa rossa
+plot(xRamp,yRamp,'r','LineWidth',2);
+
+% landing-pad verde (solo per grafica)
+plot(xPad,yPad,'Color',[0 0.8 0.2],'LineWidth',3);   % verde brillante
+
+xlabel('x [m]'); ylabel('y [m]');
+
+
+
+
+
+
+
+
