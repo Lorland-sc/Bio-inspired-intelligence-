@@ -1,0 +1,16 @@
+function [InitialObservation, LoggedSignals] = functionStart(settings)
+
+x0 = 0.8*settings.box_coordinates(1,end); % starting position
+y0 = 0*settings.box_coordinates(2,end);   
+vx0 = 2; % starting speed
+vy0 = 6;
+c0 = 0;
+
+% Return initial environment state variables as logged signal
+LoggedSignals.State = [x0; y0; vx0; vy0; c0];
+LoggedSignals.cumulativeState = [x0; y0; vx0; vy0; c0];
+LoggedSignals.cumulativeReward = [0; 0; 0; 0; 0; 0; 0; 0];
+LoggedSignals.cumulativeThrust = [0; 0];
+InitialObservation = LoggedSignals.State;
+
+end
