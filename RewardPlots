@@ -1,0 +1,23 @@
+function [] = RewardsPlots(trainingStats, settings)
+
+% Define filename for plot
+filename = "training_rewards.jpg";
+    
+% Extract data and generate timeseries
+episodeReward = trainingStats.EpisodeReward;
+averageReward = trainingStats.AverageReward;
+save('sensitivity_results_eps099.txt', 'averageReward', '-ascii'); % salvo in file di testo il risultato (ogni simulazione cambio nome)
+projectedReward = trainingStats.EpisodeQ0;
+t = 0 : 1 : (length(episodeReward) - 1 );
+
+% Plot stuff
+figure % 
+title('Rewards in time')
+hold on
+grid on
+plot(t, episodeReward, 'Color', 'b', 'LineWidth', 1, 'DisplayName', 'Episode Reward')
+plot(t, averageReward, 'Color', 'r', 'LineWidth', 1, 'DisplayName', 'Average reward ')
+xlabel('Episodes [-]')
+ylabel('Reward values [-]')
+legend('Location','northeast' )
+hold off
