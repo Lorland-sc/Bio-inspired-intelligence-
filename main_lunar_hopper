@@ -1,0 +1,152 @@
+
+% Load configurations file
+setup;
+
+%% Observation and Action spaces
+ObservationInfo = rlNumericSpec([5 1]);
+ActionInfo = rlFiniteSetSpec(settings.ActionSpace); % Tells MATLAB which actions my vehicle can take at every step
+%% environment
+ResetHandle = @() functionStart(settings); 
+StepHandle = @(Action,LoggedSignals) functionStep(Action,LoggedSignals,settings); 
+env = rlFunctionEnv(ObservationInfo,ActionInfo,StepHandle,ResetHandle); % Creates environment using the functions filenames
+%% Create DQN agent neural network
+% Create an array containing the network structure
+net = [
+    featureInputLayer(ObservationInfo.Dimension(1)) % Input layer has size of state vector (i.e. 5)
+    fullyConnectedLayer(256, ...
+                        WeightsInitializer = 'glorot', ...
+                        BiasInitializer = 'zeros') % First hidden layer
+    leakyReluLayer % First hidden layer activation function
+    fullyConnectedLayer(256, ...
+                        WeightsInitializer = 'glorot', ...
+                        BiasInitializer = 'zeros') % Second hidden layer
+    reluLayer % Second hidden layer activation function
+    fullyConnectedLayer(length(ActionInfo.Elements)) % Output layer: has size of the number of discrete actions (i.e. 4)
+    ];
+
+% Actually initialize the network
+net = dlnetwork(net);
+%% Create the agent
+
+critic = rlVectorQValueFunction(net,ObservationInfo,ActionInfo, UseDevice = settings.mainDevice);
+
+agent = rlDQNAgent(critic);
+agent.AgentOptions.UseDoubleDQN = true;
+agent.AgentOptions.TargetSmoothFactor = 1;
+agent.AgentOptions.TargetUpdateFrequency = 5;
+agent.AgentOptions.MiniBatchSize = 128;
+agent.AgentOptions.ExperienceBufferLength = 200000;
+agent.AgentOptions.EpsilonGreedyExploration.Epsilon = 0.99; % EPSILON
+agent.AgentOptions.EpsilonGreedyExploration.EpsilonDecay = 0.05; % EPSILON DECAY 
+agent.AgentOptions.EpsilonGreedyExploration.EpsilonMin = 0.001; 
+agent.AgentOptions.DiscountFactor = 0.99; % DISCOUNT FACTOR
+agent.AgentOptions.CriticOptimizerOptions.LearnRate = 1e-3; % ALPHA
+agent.AgentOptions.CriticOptimizerOptions.GradientThreshold = 1;
+
+%% Train the agent
+
+settings.resultType = "training";
+if settings.trainAgent == true
+    if settings.plotBadTrajectory == true
+        trainOpts = rlTrainingOptions(...
+            MaxEpisodes=settings.episodes_before_plot, ...
+            MaxStepsPerEpisode=500, ...
+            Verbose=false, ...
+            Plots="none",... 
+            StopTrainingCriteria="EpisodeCount", ...
+            StopTrainingValue=settings.episodes_before_plot, ...
+            UseParallel=false);
+         trainingStats = train(agent,env,trainOpts);
+    else 
+        % Define training settings for the agent
+        trainOpts = rlTrainingOptions(...
+            MaxEpisodes=settings.total_max_episodes, ...
+            MaxStepsPerEpisode=500, ...
+            Verbose=false, ...
+            Plots="training-progress",...  
+            StopTrainingCriteria="AverageReward", ...
+            ScoreAveragingWindowLength = 50, ...
+            StopTrainingValue = 85, ...
+            UseParallel=settings.runParallel);
+        % Train the agent
+        trainingStats = train(agent,env,trainOpts);
+        save(pwd + "/SimOut_Data/trainingStats.mat", 'trainingStats');
+        save(pwd + "/SimOut_Agents/agentRef.mat", 'agent');
+    end
+    if settings.runParallel == false
+        Y_tot = env.LoggedSignals.cumulativeState;
+        T_tot = env.LoggedSignals.cumulativeThrust;
+        % Plot trajectory
+        TrajPlots(Y_tot, T_tot, settings)
+        disp("Cumulative reward: " + num2str(sum(sum(env.LoggedSignals.cumulativeReward))))
+        disp("Penalty proportional distance: " + num2str(sum(env.LoggedSignals.cumulativeReward(1, :))))
+        disp("Penalty proportional speed: " + num2str(sum(env.LoggedSignals.cumulativeReward(2, :))))
+        disp("Penalty side engines: " + num2str(sum(env.LoggedSignals.cumulativeReward(3, :))))
+        disp("Penalty main engine: " + num2str(sum(env.LoggedSignals.cumulativeReward(4, :))))
+        disp("Penalty exit boundaries: " + num2str(sum(env.LoggedSignals.cumulativeReward(5, :))))
+        disp("Penalty crash outside: " + num2str(sum(env.LoggedSignals.cumulativeReward(6, :))))
+        disp("Penalty crash inside landing pad: " + num2str(sum(env.LoggedSignals.cumulativeReward(7, :))))
+        disp("Reward successful landing " + num2str(sum(env.LoggedSignals.cumulativeReward(8, :))))
+        disp("Touchdown vx " + num2str(env.LoggedSignals.velocityTouchdown(1)))
+        disp("Touchdown vy " + num2str(env.LoggedSignals.velocityTouchdown(2)))
+        disp("Total number of steps: " + num2str(size(Y_tot, 2)))
+        disp("Total landing duration in simulation time [s]: " + num2str(size(Y_tot, 2)*settings.dt))
+    end
+    disp("Training terminated")
+    disp("-----------------")
+else
+    load(pwd + "/SimOut_Agents/agentRef", 'agent');
+    load(pwd + "/SimOut_Data/trainingStats.mat", 'trainingStats');
+end
+
+%% Extract and plot rewards 
+if settings.plotBadTrajectory == false
+    RewardsPlots(trainingStats, settings)
+end
+
+%% Simulating
+
+rng(0)
+
+% Define simulation options 
+simOpts = rlSimulationOptions(MaxSteps = 500, ...
+                              NumSimulations= 1);
+
+% Simulate
+experience = sim(env,agent,simOpts);
+
+% Extract results from experience object
+settings.resultType = "simulation";
+for i = 1:size(experience, 1)
+    % Extract timeseries vector
+    t_sim = zeros(1, size(experience(i).Observation.LunarLanderStateVector.Time, 1));
+    t_sim(:) = experience(i).Observation.LunarLanderStateVector.Time(:, 1);
+
+    % Extract states
+    Y_sim = zeros(5, size(experience(i).Observation.LunarLanderStateVector.Data, 3));
+    Y_sim(:, :) = experience(i).Observation.LunarLanderStateVector.Data(:, 1, :);
+
+    % Extract actions and separate them in Tx and Ty
+    combinedActions = experience(i).Action.LunarLanderGuidance.Data(1, 1, :);
+
+    Tx = zeros(1, size(experience(i).Action.LunarLanderGuidance.Data, 3));
+    Ty = zeros(1, size(experience(i).Action.LunarLanderGuidance.Data, 3));
+
+    Tx_positive_idx = find(combinedActions == settings.ActionSpace(4));
+    Tx_negative_idx = find(combinedActions == settings.ActionSpace(5));
+    Ty_low_idx = find(combinedActions == settings.ActionSpace(2));
+    Ty_high_idx = find(combinedActions == settings.ActionSpace(3));
+
+    Tx(Tx_positive_idx) = settings.ActionSpace(4);
+    Tx(Tx_negative_idx) = settings.ActionSpace(5);
+    Ty(Ty_low_idx) = settings.ActionSpace(2);
+    Ty(Ty_high_idx) = settings.ActionSpace(3);
+
+    T_sim = [0, Tx; 
+             0, Ty];
+
+    TrajPlots(Y_sim, T_sim, settings)
+end
+
+
+
