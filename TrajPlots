@@ -1,0 +1,159 @@
+function [] = TrajPlots(Y, T, settings)
+
+%% ────────────────────────────────────────────────────────────────────────
+% 1) prepara nomi base per il salvataggio
+baseName = "/SimOut_Media/";
+if settings.resultType == "training"
+    baseName = baseName + "training_";
+else
+    baseName = baseName + "sim_";
+end
+if settings.plotBadTrajectory
+    baseName = baseName + "bad";
+else
+    baseName = baseName + "good";
+end
+
+% 2) timeline
+t = 0 : settings.dt : (length(Y(1,:))*settings.dt - settings.dt );
+
+%% ---------- Terreno: landing-pad in cima a una montagnetta -------------
+padHalf   = settings.landing_pad_width/2;   % metà pista (es. 4-5 m)
+landingY  = -settings.landing_pad_altitude; % quota pista (spesso 0)
+hillH     = 6;                              % altezza collina
+sigmaHill = 12;                             % larghezza gaussiana
+
+xL = settings.box_coordinates(1,1);         % bordo sinistro box
+xR = settings.box_coordinates(1,2);         % bordo destro  box
+
+% ------------ profilo continuo “collinetta” -----------------------------
+xProfile = linspace(xL, xR, 500);
+yBase    = landingY - hillH;                        % livello base
+hill     = hillH * exp(-0.5*(xProfile/sigmaHill).^2);
+yProfile = yBase + hill;                            % collina+base
+
+% plateau piatto (landing-pad) in [-padHalf, +padHalf]
+padMask           = (xProfile >= -padHalf & xProfile <= padHalf);
+yProfile(padMask) = landingY;
+
+%% ---------- Rampa di lancio orizzontale (rossa) ------------------------
+x0        = 0.8*settings.box_coordinates(1,end);  % centro rampa
+y0        = 0;                                    % quota rampa
+rampWidth = 8;  nRampPts = 20;
+xRamp     = linspace(x0-rampWidth/2, x0+rampWidth/2, nRampPts);
+yRamp     = y0*ones(1,nRampPts);
+
+%% ---------- Nodi per l’ambiente (collina + rampa) ----------------------
+% Seleziona sotto-campione profilo
+keep                = 1:10:length(xProfile);
+ground_nodes        = [xProfile(keep); yProfile(keep)];
+
+% Elimina nodi che cadono sotto la rampa
+maskKeep            = (ground_nodes(1,:) <  xRamp(1)) | ...
+                      (ground_nodes(1,:) >  xRamp(end));
+ground_nodes        = ground_nodes(:,maskKeep);
+
+% Inserisci i nodi rampa
+ground_nodes        = [ground_nodes  [xRamp; yRamp]];
+
+% --------------- facoltativo: landing-pad come nodi dedicati ------------
+nPadPts  = 20;                                    % risoluzione pad
+xPad     = linspace(-padHalf, padHalf, nPadPts);  % segmenti verdi
+yPad     = landingY*ones(1,nPadPts);
+ground_nodes = [ground_nodes [xPad; yPad]];       % aggiungi
+
+% Ordina per x
+[~,idx]    = sort(ground_nodes(1,:));
+settings.ground_nodes = ground_nodes(:,idx);
+
+%% ----------------------------- PLOT ------------------------------------
+figure; hold on; axis equal; grid on
+title('Trajectory and velocity');
+
+% terreno nero
+plot(settings.ground_nodes(1,:), settings.ground_nodes(2,:), ...
+     'k','LineWidth',2);
+
+% rampa rossa
+plot(xRamp,yRamp,'r','LineWidth',2);
+
+% landing-pad verde (solo per grafica)
+plot(xPad,yPad,'Color',[0 0.8 0.2],'LineWidth',3);   % verde brillante
+
+xlabel('x [m]'); ylabel('y [m]');
+
+%% --- traiettoria con colormap turbo ------------------------------------
+c = hypot(Y(3,:), Y(4,:));               % velocità modulo
+scatter(Y(1,:), Y(2,:), 16, c, 'filled');
+colormap(turbo);                         % palette turbo
+
+cbar = colorbar;
+cbar.Label.String = 'Vehicle velocity [m/s]';
+cbar.Color = 'k';                        % testo/gradazioni nere
+
+%% --- assi, layout -------------------------------------------------------
+xlabel('[m]');  ylabel('[m]');
+set(gca,'FontSize',15, ...
+        'XColor','k','YColor','k', ...
+        'Color','w');                   % “cielo” bianco
+axis square
+box on
+hold off
+
+
+%% === VEHICLE POSITION ==================================================
+figure('Name','Vehicle position','Position',[820 60 600 400]);
+title('Vehicle position in time'); hold on; grid on
+
+fill([t(1), t(end), t(end), t(1)], [-5, -5, 5, 5], ...
+     [0.8, 1, 0.8], 'EdgeColor','none', 'FaceAlpha',0.3);
+
+plot([t(1), t(end)], [0, 0], 'k--', 'LineWidth', 1.5)
+plot(t, Y(1,:), 'r', 'LineWidth', 2)
+plot(t, Y(2,:), 'b', 'LineWidth', 2)
+
+xlabel('Simulation time [s]'); ylabel('Position [m]');
+legend({'Landing pad zone','Landing pad centre','x_{vehicle}','y_{vehicle}'},'Location','northeast');
+set(gca,'FontSize',15); xlim([t(1), t(end)]); pbaspect([2 1 1]); hold off
+
+
+
+%% === VELOCITY ==========================================================
+figure('Name','Velocity','Position',[200 520 600 400]);
+title('Velocity'); hold on; grid on
+
+h1 = plot(t, sqrt(Y(3,:).^2 + Y(4,:).^2), 'b', 'LineWidth', 1); % velocità
+h2 = plot([t(1), t(end)], [settings.v_limit, settings.v_limit], 'r--'); % limite
+
+% area verde
+h3 = fill([t(1), t(end), t(end), t(1)], ...
+          [0, 0, settings.v_limit, settings.v_limit], ...
+          'green', 'FaceAlpha', .2, 'EdgeColor','none'); 
+
+% patch invisibile solo per fare comparire il box ben visibile in legenda
+h4 = patch(NaN, NaN, 'green', 'FaceAlpha', .2);
+
+xlabel('time [s]'); ylabel('velocity [m/s]');
+legend([h1, h4], {'v_{vehicle}','Acceptable region'}, ...
+       'Location','best');
+
+set(gca,'FontSize',15); 
+xlim([t(1), t(end)]); 
+ylim([0, 13]); 
+pbaspect([2 1 1]); 
+hold off
+
+
+%% === THRUST COMMANDS ===================================================
+figure('Name','Thrust commands','Position',[820 520 600 400]);
+title('Thrust in time '); hold on; grid on
+
+plot(t, T(1,:), 'm', 'LineWidth', 1)
+col = [237, 177, 32] / 255;
+plot(t, T(2,:), 'Color', col, 'LineWidth', 1)
+
+xlabel('time [s]'); ylabel('Thrust [N]');
+legend({'T in x direction ','T in y direction'});
+set(gca,'FontSize',10); xlim([t(1), t(end)]); ylim([-20000, 60000]); pbaspect([2 1 1]); hold off
+
+end
